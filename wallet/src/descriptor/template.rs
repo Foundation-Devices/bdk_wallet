@@ -236,7 +236,10 @@ pub struct Bip44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Pkh(legacy::make_bipxx_private(44, self.0, self.1, network, None)?).build(network)
+        P2Pkh(legacy::make_bipxx_private(
+            44, self.0, self.1, network, None,
+        )?)
+        .build(network)
     }
 }
 
@@ -313,7 +316,10 @@ pub struct Bip49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh_P2Sh(segwit_v0::make_bipxx_private(49, self.0, self.1, network, None)?).build(network)
+        P2Wpkh_P2Sh(segwit_v0::make_bipxx_private(
+            49, self.0, self.1, network, None,
+        )?)
+        .build(network)
     }
 }
 
@@ -390,7 +396,10 @@ pub struct Bip84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh(segwit_v0::make_bipxx_private(84, self.0, self.1, network, None)?).build(network)
+        P2Wpkh(segwit_v0::make_bipxx_private(
+            84, self.0, self.1, network, None,
+        )?)
+        .build(network)
     }
 }
 
@@ -467,7 +476,10 @@ pub struct Bip86<K: DerivableKey<Tap>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2TR(segwit_v1::make_bipxx_private(86, self.0, self.1, network, None)?).build(network)
+        P2TR(segwit_v1::make_bipxx_private(
+            86, self.0, self.1, network, None,
+        )?)
+        .build(network)
     }
 }
 
@@ -539,7 +551,14 @@ pub struct Bip48Member<K: DerivableKey<Legacy>>(pub K, pub KeychainKind, pub u32
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip48Member<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Pkh(legacy::make_bipxx_private(48, self.0, self.1, network, Some(self.2))?).build(network)
+        P2Pkh(legacy::make_bipxx_private(
+            48,
+            self.0,
+            self.1,
+            network,
+            Some(self.2),
+        )?)
+        .build(network)
     }
 }
 
