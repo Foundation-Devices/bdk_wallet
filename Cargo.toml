@@ -11,6 +11,11 @@ members = [
 [workspace.package]
 authors = ["Bitcoin Dev Kit Developers"]
 
+[workspace.dependencies]
+bdk_chain = { git = "https://github.com/Foundation-Devices/bdk-1", rev = "fd5b8152fdb49b3d457ec4c92591bdc45f00f43f" }
+bdk_core = { git = "https://github.com/Foundation-Devices/bdk-1", rev = "fd5b8152fdb49b3d457ec4c92591bdc45f00f43f" }
+bdk_electrum = { git = "https://github.com/Foundation-Devices/bdk-1", rev = "fd5b8152fdb49b3d457ec4c92591bdc45f00f43f" }
+
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
