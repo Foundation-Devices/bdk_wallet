@@ -25,8 +25,9 @@ use crate::keys::{DerivableKey, IntoDescriptorKey, ValidNetworks};
 use crate::wallet::utils::SecpCtx;
 use crate::{descriptor, KeychainKind};
 
-/// Type alias for the return type of [`DescriptorTemplate`], [`descriptor!`](crate::descriptor!)
-/// and others
+use alloc::vec::Vec;
+
+/// Type alias for the return type of [`DescriptorTemplate`], [`descriptor!`](crate::descriptor!) and others
 pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 
 /// Trait for descriptor templates that can be built into a full descriptor
@@ -291,7 +292,7 @@ pub struct Bip44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, p
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         P2Pkh(legacy::make_bipxx_public(
-            44, self.0, self.1, self.2, network,
+            44, self.0, self.1, self.2, network, None,
         )?)
         .build(network)
     }
@@ -382,7 +383,7 @@ pub struct Bip49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint,
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         P2Wpkh_P2Sh(segwit_v0::make_bipxx_public(
-            49, self.0, self.1, self.2, network,
+            49, self.0, self.1, self.2, network, None,
         )?)
         .build(network)
     }
@@ -473,7 +474,7 @@ pub struct Bip84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint,
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         P2Wpkh(segwit_v0::make_bipxx_public(
-            84, self.0, self.1, self.2, network,
+            84, self.0, self.1, self.2, network, None,
         )?)
         .build(network)
     }
@@ -564,7 +565,7 @@ pub struct Bip86Public<K: DerivableKey<Tap>>(pub K, pub bip32::Fingerprint, pub 
 impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         P2TR(segwit_v1::make_bipxx_public(
-            86, self.0, self.1, self.2, network,
+            86, self.0, self.1, self.2, network, None,
         )?)
         .build(network)
     }
@@ -622,6 +623,198 @@ impl<K: DerivableKey<Legacy>> Bip48Member<K> {
     }
 }
 
+/// BIP48 Script type for multisig descriptors
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bip48ScriptType {
+    /// P2SH-P2WSH (script type 1)
+    P2shP2wsh = 1,
+    /// P2WSH (script type 2)
+    P2wsh = 2,
+}
+
+/// BIP48 Multisig template. Expands to `sh(wsh(sortedmulti(threshold, key/48'/{0,1}'/0'/script_type/{0,1}/*, ...)))` or `wsh(sortedmulti(threshold, key/48'/{0,1}'/0'/script_type/{0,1}/*, ...))`
+///
+/// This template creates a multisig descriptor following BIP48 derivation paths.
+/// Since there are hardened derivation steps, this template requires private derivable keys (generally `xprv`/`tprv`).
+///
+/// ## Example
+///
+/// ```rust
+/// # use std::str::FromStr;
+/// # use bdk_wallet::bitcoin::{PrivateKey, Network};
+/// # use bdk_wallet::{Wallet, KeychainKind};
+/// use bdk_wallet::template::{Bip48Multisig, Bip48ScriptType};
+///
+/// let key1 = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
+/// let key2 = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
+/// let key_source1 = (bitcoin::bip32::Fingerprint::from_str("c55b303f")?,
+///                   bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'")?);  // P2WSH
+/// let key_source2 = (bitcoin::bip32::Fingerprint::from_str("d34db33f")?,
+///                   bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'")?);  // P2WSH
+/// let signers = vec![(key1, key_source1), (key2, key_source2)];
+///
+/// let mut wallet = Wallet::create(
+///     Bip48Multisig::new(2, signers.clone(), Bip48ScriptType::P2wsh, KeychainKind::External),
+///     Bip48Multisig::new(2, signers, Bip48ScriptType::P2wsh, KeychainKind::Internal)
+/// )
+/// .network(Network::Testnet)
+/// .create_wallet_no_persist()?;
+/// # Ok::<_, Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct Bip48Multisig<K: DerivableKey<Segwitv0>> {
+    threshold: usize,
+    signers: Vec<(K, bip32::KeySource)>,
+    script_type: Bip48ScriptType,
+    keychain: KeychainKind,
+}
+
+impl<K: DerivableKey<Segwitv0>> Bip48Multisig<K> {
+    /// Create a new BIP48 multisig template
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - The threshold number of signatures required (M in M-of-N)
+    /// * `signers` - Vector of (key, KeySource) pairs for the multisig participants
+    ///               KeySource is (Fingerprint, DerivationPath) containing origin info
+    /// * `script_type` - The script type (P2SH-P2WSH or P2WSH)
+    /// * `keychain` - The keychain kind (External or Internal)
+    pub fn new(
+        threshold: usize,
+        signers: Vec<(K, bip32::KeySource)>,
+        script_type: Bip48ScriptType,
+        keychain: KeychainKind,
+    ) -> Self {
+        Self {
+            threshold,
+            signers,
+            script_type,
+            keychain,
+        }
+    }
+}
+
+impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip48Multisig<K> {
+    fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        let derived_keys = self
+            .signers
+            .into_iter()
+            .map(|(key, key_source)| {
+                let keychain_path = bip32::DerivationPath::from(vec![
+                    bip32::ChildNumber::from_normal_idx(match self.keychain {
+                        KeychainKind::External => 0,
+                        KeychainKind::Internal => 1,
+                    }).unwrap()
+                ]);
+                key.into_descriptor_key(Some(key_source), keychain_path)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        match self.script_type {
+            Bip48ScriptType::P2shP2wsh => {
+                descriptor!(sh(wsh(sortedmulti_vec(self.threshold, derived_keys))))
+            }
+            Bip48ScriptType::P2wsh => {
+                descriptor!(wsh(sortedmulti_vec(self.threshold, derived_keys)))
+            }
+        }
+    }
+}
+
+/// BIP48 Multisig public template. Expands to `sh(wsh(sortedmulti(threshold, key/{0,1}/*, ...)))` or `wsh(sortedmulti(threshold, key/{0,1}/*, ...))`
+///
+/// This assumes that the keys used have already been derived with `m/48'/{0,1}'/0'/script_type'` for the account level.
+///
+/// This template requires the parent fingerprints to populate correctly the metadata of PSBTs.
+///
+/// See [`Bip48Multisig`] for a template that does the full derivation, but requires private data
+/// for the keys.
+///
+/// ## Example
+///
+/// ```rust
+/// # use std::str::FromStr;
+/// # use bdk_wallet::bitcoin::{PrivateKey, Network};
+/// # use bdk_wallet::{Wallet, KeychainKind};
+/// use bdk_wallet::template::{Bip48MultisigPublic, Bip48ScriptType};
+///
+/// let key1 = bitcoin::bip32::Xpub::from_str("tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK")?;
+/// let key2 = bitcoin::bip32::Xpub::from_str("tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK")?;
+/// let key_source1 = (bitcoin::bip32::Fingerprint::from_str("c55b303f")?,
+///                   bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'")?);  // P2WSH
+/// let key_source2 = (bitcoin::bip32::Fingerprint::from_str("d34db33f")?,
+///                   bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'")?);  // P2WSH
+///
+/// let signers = vec![(key1, key_source1), (key2, key_source2)];
+///
+/// let mut wallet = Wallet::create(
+///     Bip48MultisigPublic::new(2, signers.clone(), Bip48ScriptType::P2wsh, KeychainKind::External),
+///     Bip48MultisigPublic::new(2, signers, Bip48ScriptType::P2wsh, KeychainKind::Internal)
+/// )
+/// .network(Network::Testnet)
+/// .create_wallet_no_persist()?;
+/// # Ok::<_, Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct Bip48MultisigPublic<K: DerivableKey<Segwitv0>> {
+    threshold: usize,
+    signers: Vec<(K, bip32::KeySource)>,
+    script_type: Bip48ScriptType,
+    keychain: KeychainKind,
+}
+
+impl<K: DerivableKey<Segwitv0>> Bip48MultisigPublic<K> {
+    /// Create a new BIP48 multisig public template
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - The threshold number of signatures required (M in M-of-N)
+    /// * `signers` - Vector of (key, KeySource) pairs for the multisig participants
+    ///               KeySource is (Fingerprint, DerivationPath) containing origin info
+    /// * `script_type` - The script type (P2SH-P2WSH or P2WSH)
+    /// * `keychain` - The keychain kind (External or Internal)
+    pub fn new(
+        threshold: usize,
+        signers: Vec<(K, bip32::KeySource)>,
+        script_type: Bip48ScriptType,
+        keychain: KeychainKind,
+    ) -> Self {
+        Self {
+            threshold,
+            signers,
+            script_type,
+            keychain,
+        }
+    }
+}
+
+impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip48MultisigPublic<K> {
+    fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        let derived_keys = self
+            .signers
+            .into_iter()
+            .map(|(key, key_source)| {
+                let keychain_path = bip32::DerivationPath::from(vec![
+                    bip32::ChildNumber::from_normal_idx(match self.keychain {
+                        KeychainKind::External => 0,
+                        KeychainKind::Internal => 1,
+                    }).unwrap()
+                ]);
+                key.into_descriptor_key(Some(key_source), keychain_path)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        match self.script_type {
+            Bip48ScriptType::P2shP2wsh => {
+                descriptor!(sh(wsh(sortedmulti_vec(self.threshold, derived_keys))))
+            }
+            Bip48ScriptType::P2wsh => {
+                descriptor!(wsh(sortedmulti_vec(self.threshold, derived_keys)))
+            }
+        }
+    }
+}
+
 macro_rules! expand_make_bipxx {
     ( $mod_name:ident, $ctx:ty ) => {
         mod $mod_name {
@@ -672,20 +865,27 @@ macro_rules! expand_make_bipxx {
                 parent_fingerprint: bip32::Fingerprint,
                 keychain: KeychainKind,
                 network: Network,
+                script: Option<u32>,
             ) -> Result<impl IntoDescriptorKey<$ctx>, DescriptorError> {
                 let derivation_path: bip32::DerivationPath = match keychain {
                     KeychainKind::External => vec![bip32::ChildNumber::from_normal_idx(0)?].into(),
                     KeychainKind::Internal => vec![bip32::ChildNumber::from_normal_idx(1)?].into(),
                 };
 
-                let source_path = bip32::DerivationPath::from(vec![
+                let mut source_path_vec = vec![
                     bip32::ChildNumber::from_hardened_idx(bip)?,
                     match network {
                         Network::Bitcoin => bip32::ChildNumber::from_hardened_idx(0)?,
                         _ => bip32::ChildNumber::from_hardened_idx(1)?,
                     },
                     bip32::ChildNumber::from_hardened_idx(0)?,
-                ]);
+                ];
+
+                if let Some(s) = script {
+                    source_path_vec.push(bip32::ChildNumber::from_hardened_idx(s)?);
+                }
+
+                let source_path = bip32::DerivationPath::from(source_path_vec);
 
                 Ok((key, (parent_fingerprint, source_path), derivation_path))
             }
@@ -1130,5 +1330,76 @@ mod test {
                 "bc1pgcwgsu8naxp7xlp5p7ufzs7emtfza2las7r2e7krzjhe5qj5xz2q88kmk5",
             ],
         );
+    }
+
+    // BIP48 Multisig templates
+    #[test]
+    fn test_bip48_multisig_template() {
+        let key1 = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let key2 = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m").unwrap();
+        let key_source1 = (
+            bitcoin::bip32::Fingerprint::from_str("c55b303f").unwrap(),
+            bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'").unwrap(),
+        );
+        let key_source2 = (
+            bitcoin::bip32::Fingerprint::from_str("d34db33f").unwrap(),
+            bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'").unwrap(),
+        );
+        let signers = vec![(key1, key_source1), (key2, key_source2)];
+
+        // Test P2WSH multisig
+        let template = Bip48Multisig::new(
+            2,
+            signers.clone(),
+            Bip48ScriptType::P2wsh,
+            KeychainKind::External,
+        );
+        let result = template.build(Network::Testnet);
+        assert!(result.is_ok());
+        let (desc, _keymap, _networks) = result.unwrap();
+        assert!(desc.to_string().contains("wsh(sortedmulti(2,"));
+        assert!(desc.to_string().contains("/0/*"));
+        assert!(desc.to_string().contains("[c55b303f/48'/1'/0'/2']"));
+        assert!(desc.to_string().contains("[d34db33f/48'/1'/0'/2']"));
+
+        // Test P2SH-P2WSH multisig
+        let template = Bip48Multisig::new(
+            2,
+            signers,
+            Bip48ScriptType::P2shP2wsh,
+            KeychainKind::External,
+        );
+        let result = template.build(Network::Testnet);
+        assert!(result.is_ok());
+        let (desc, _keymap, _networks) = result.unwrap();
+        assert!(desc.to_string().contains("sh(wsh(sortedmulti(2,"));
+        assert!(desc.to_string().contains("/0/*"));
+        assert!(desc.to_string().contains("[c55b303f/48'/1'/0'/2']"));
+        assert!(desc.to_string().contains("[d34db33f/48'/1'/0'/2']"));
+    }
+
+    #[test]
+    fn test_bip48_multisig_public_template() {
+        let key1 = bitcoin::bip32::Xpub::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU").unwrap();
+        let key2 = bitcoin::bip32::Xpub::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L").unwrap();
+        let key_source1 = (
+            bitcoin::bip32::Fingerprint::from_str("c55b303f").unwrap(),
+            bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'").unwrap(),
+        );
+        let key_source2 = (
+            bitcoin::bip32::Fingerprint::from_str("d34db33f").unwrap(),
+            bitcoin::bip32::DerivationPath::from_str("m/48'/1'/0'/2'").unwrap(),
+        );
+
+        let signers = vec![(key1, key_source1), (key2, key_source2)];
+
+        // Test P2WSH public multisig
+        let template =
+            Bip48MultisigPublic::new(2, signers, Bip48ScriptType::P2wsh, KeychainKind::External);
+        let result = template.build(Network::Testnet);
+        assert!(result.is_ok());
+        let (desc, _keymap, _networks) = result.unwrap();
+        assert!(desc.to_string().contains("wsh(sortedmulti(2,"));
+        assert!(desc.to_string().contains("/48'/1'/0'/2']tpub"));
     }
 }
