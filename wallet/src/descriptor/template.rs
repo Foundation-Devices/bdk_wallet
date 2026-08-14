@@ -658,6 +658,46 @@ impl<K: DerivableKey<Legacy>> Bip48Member<K> {
     }
 }
 
+/// BIP45 member template. Expands to `pkh(key/45'/cosigner_index/{0,1}/*)`.
+///
+/// BIP45 derives each cosigner's public key from a shared `m/45'` root. The
+/// cosigner index is an unhardened child selected by lexicographically sorting
+/// those root public keys; the following child is the receive/change branch.
+///
+/// Unlike the BIP44-style templates, BIP45 has no coin-type or account level,
+/// so this template is intentionally independent of the supplied network.
+#[derive(Debug, Clone)]
+pub struct Bip45Member<K: DerivableKey<Legacy>>(pub K, pub KeychainKind, pub u32);
+
+impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip45Member<K> {
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Pkh(bip45::make_bip45_private(self.0, self.1, self.2)?).build(network)
+    }
+}
+
+mod bip45 {
+    use super::*;
+
+    pub(super) fn make_bip45_private<K: DerivableKey<Legacy>>(
+        key: K,
+        keychain: KeychainKind,
+        cosigner_index: u32,
+    ) -> Result<impl IntoDescriptorKey<Legacy>, DescriptorError> {
+        let branch = match keychain {
+            KeychainKind::External => 0,
+            KeychainKind::Internal => 1,
+        };
+        let derivation_path = vec![
+            bip32::ChildNumber::from_hardened_idx(45)?,
+            bip32::ChildNumber::from_normal_idx(cosigner_index)?,
+            bip32::ChildNumber::from_normal_idx(branch)?,
+        ]
+        .into();
+
+        Ok((key, derivation_path))
+    }
+}
+
 macro_rules! expand_make_bipxx {
     ( $mod_name:ident, $ctx:ty ) => {
         mod $mod_name {
@@ -1419,5 +1459,48 @@ mod test {
             .unwrap()
             .to_string();
         assert_ne!(default_address, account_index_address);
+    }
+
+    #[test]
+    fn test_bip45_member_template_uses_cosigner_and_keychain_indexes() {
+        let prvkey = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m").unwrap();
+        let first_member = Bip45Member(prvkey, KeychainKind::External, 0)
+            .build(Network::Testnet)
+            .unwrap()
+            .0;
+        let second_member = Bip45Member(prvkey, KeychainKind::External, 1)
+            .build(Network::Testnet)
+            .unwrap()
+            .0;
+        let change = Bip45Member(prvkey, KeychainKind::Internal, 0)
+            .build(Network::Testnet)
+            .unwrap()
+            .0;
+
+        assert!(first_member.to_string().contains("[c55b303f/45']"));
+        assert!(first_member.to_string().contains("/0/0/*)"));
+        assert_ne!(first_member.to_string(), second_member.to_string());
+        assert_ne!(first_member.to_string(), change.to_string());
+
+        let first_address = first_member
+            .at_derivation_index(0)
+            .unwrap()
+            .address(Network::Regtest)
+            .unwrap()
+            .to_string();
+        let second_address = second_member
+            .at_derivation_index(0)
+            .unwrap()
+            .address(Network::Regtest)
+            .unwrap()
+            .to_string();
+        let change_address = change
+            .at_derivation_index(0)
+            .unwrap()
+            .address(Network::Regtest)
+            .unwrap()
+            .to_string();
+        assert_ne!(first_address, second_address);
+        assert_ne!(first_address, change_address);
     }
 }
