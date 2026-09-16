@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 bdk_wallet = { path = "../../wallet", features = ["file_store"] }
-bdk_electrum = { version = "0.22.0" }
+bdk_electrum = { git = "https://github.com/Foundation-Devices/bdk-1", rev = "0a532f6bcb042edb192a2db2673e331e7189e00e" }
 anyhow = "1"

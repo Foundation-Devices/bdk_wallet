@@ -47,6 +47,33 @@ const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
 const DB_MAGIC: &[u8] = &[0x21, 0x24, 0x48];
 
 #[test]
+fn wallet_update_serialization_roundtrip() {
+    let genesis = bitcoin::blockdata::constants::genesis_block(Network::Regtest);
+    let mut update = Update {
+        chain: Some(bdk_chain::CheckPoint::new(BlockId {
+            height: 0,
+            hash: genesis.block_hash(),
+        })),
+        ..Default::default()
+    };
+    update.last_active_indices.insert(KeychainKind::External, 3);
+    update
+        .tx_update
+        .txs
+        .push(Arc::new(genesis.txdata[0].clone()));
+
+    let encoded = serde_json::to_vec(&update).unwrap();
+    let decoded: Update = serde_json::from_slice(&encoded).unwrap();
+
+    assert_eq!(decoded.last_active_indices, update.last_active_indices);
+    assert_eq!(decoded.tx_update.txs, update.tx_update.txs);
+    assert_eq!(
+        decoded.chain.unwrap().block_id(),
+        update.chain.unwrap().block_id()
+    );
+}
+
+#[test]
 fn wallet_is_persisted() -> anyhow::Result<()> {
     fn run<Db, CreateDb, OpenDb>(
         filename: &str,

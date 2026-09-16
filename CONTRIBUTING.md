@@ -48,6 +48,12 @@ hesitate to split it into multiple small, focused PRs.
 
 The Minimum Supported Rust Version is **1.63.0** (enforced by our CI).
 
+CI uses the committed `Cargo.lock` with `--locked`, including the Rust 1.63 jobs.
+To refresh dependencies, run `./ci/pin-msrv.sh` with Cargo 1.84 or newer and commit
+the generated lockfile. Keep the MSRV checks enabled when changing these pins.
+The Foundation BDK crates in the wallet and examples must use the same revision
+so their update and checkpoint types, including serialization, remain compatible.
+
 Commits should cover both the issue fixed and the solution's rationale.
 These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind. Commit messages follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/) to make commit histories easier to read by humans and automated tools. All commits must be [GPG signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
 
