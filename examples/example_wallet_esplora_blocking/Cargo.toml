@@ -8,5 +8,6 @@ publish = false
 
 [dependencies]
 bdk_wallet = { path = "../../wallet", features = ["file_store"] }
-bdk_esplora = { git = "https://github.com/Foundation-Devices/bdk-1", rev = "0a532f6bcb042edb192a2db2673e331e7189e00e", features = ["blocking"] }
+# Native TLS avoids minreq's obsolete rustls 0.21 certificate verifier.
+bdk_esplora = { git = "https://github.com/Foundation-Devices/bdk-1", rev = "0a532f6bcb042edb192a2db2673e331e7189e00e", default-features = false, features = ["std", "blocking-https-native"] }
 anyhow = "1"
